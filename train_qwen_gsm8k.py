@@ -254,16 +254,14 @@ def train_with_grpo(
         # Extract ground truth answers from the dataset
         # GRPO expects rewards for each completion
         rewards = []
-        for completion in completions:
-            # Find the corresponding ground truth
-            # For now, we'll use a simple approach
-            # In practice, you'd match prompts to dataset entries
-            gt_answer = kwargs.get("ground_truth", "#### 0")
+
+        for i, completion in enumerate(completions):
+            gt_answer = dataset[i]["answer"] # kwargs.get("ground_truth", "#### 0")
             reward = compute_reward([completion], [gt_answer])[0]
             rewards.append(reward)
+        
         return rewards
 
-    # GRPO Configuration
     grpo_config = GRPOConfig(
         output_dir=output_dir,
         per_device_train_batch_size=1,
@@ -271,26 +269,25 @@ def train_with_grpo(
         gradient_accumulation_steps=1,
         learning_rate=1e-6,
         num_train_epochs=1,
-        max_steps=500,
+        max_steps=10,
         logging_steps=1,
-        save_steps=100,
+        save_steps=1,
         max_prompt_length=128,
         max_completion_length=400,
         num_generations=4,
-        generation_batch_size=4,  # Must be divisible by num_generations
+        generation_batch_size=4,
         temperature=1.0,
         beta=0.1,
         epsilon=0.2,
         dataloader_num_workers=2,
         bf16=True,
-        report_to="wandb" if os.getenv("WANDB_API_KEY") else "none",
         seed=42,
     )
 
     # Initialize GRPO trainer with custom callback
     grpo_trainer = GRPOTrainer(
         model=model,
-        reward_funcs=reward_function,
+        reward_funcs=lambda prompts, completions, **kwargs: reward_function(prompts, completions, dataset=train_dataset),
         args=grpo_config,
         train_dataset=train_dataset,
 
