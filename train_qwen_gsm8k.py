@@ -253,16 +253,19 @@ def train_with_grpo(
         GRPO reward function that compares generated completions with ground truth.
         Returns a list of rewards.
         """
-        # rewards = []
+        # # random reward for testing
+        # return [np.random.uniform(0, 1) for _ in completions]
 
-        # for i, completion in enumerate(completions):
-        #     gt_answer = dataset[i]["answer"] # kwargs.get("ground_truth", "#### 0")
-        #     reward = compute_reward([completion], [gt_answer])[0]
-        #     rewards.append(reward)
+        rewards = []
+
+        for i, completion in enumerate(completions):
+            gt_answer = dataset[i]["answer"] # kwargs.get("ground_truth", "#### 0")
+            reward = compute_reward([completion], [gt_answer])[0]
+            rewards.append(reward)
         
-        # return rewards
-
-        return [np.random.uniform(0, 1) for _ in completions]
+        return rewards
+    
+    
 
     grpo_config = GRPOConfig(
         output_dir=output_dir,

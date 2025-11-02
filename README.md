@@ -25,6 +25,7 @@ chmod +x run_training.sh
 .
 ├── reward_function.py       # Custom reward function for exact numeric matching
 ├── train.py                 # Main training script
+├── visualize_logs.py        # Visualization script for training logs
 ├── run_training.sh          # Bash script to run the full pipeline
 └── README.md                # This file
 ```
@@ -122,6 +123,28 @@ GRPO training logs are saved to `./qwen_gsm8k_grpo/grpo_training_logs.jsonl` wit
 - grad_norm, learning_rate
 - time_per_step_s, generation_time_s, backward_time_s, other_time_s
 - tokens_generated
+
+### Visualizing Training Progress
+
+Visualize training metrics with plots:
+
+```bash
+# Basic usage (uses default paths)
+python3 visualize_logs.py
+
+# Specify custom log file and output directory
+python3 visualize_logs.py \
+    --log_file ./qwen_gsm8k_grpo/grpo_training_logs.jsonl \
+    --output ./plots
+```
+
+This generates 4 plots:
+- **losses.png**: GRPO loss, policy loss, KL loss, gradient norm, learning rate
+- **rewards.png**: Reward mean ± std, advantage mean ± std
+- **timing.png**: Time breakdown (generation/backward/other), total time per step
+- **tokens.png**: Tokens generated per step
+
+The script also prints a summary of training statistics to the console.
 
 ## Notes
 
