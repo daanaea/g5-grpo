@@ -295,6 +295,7 @@ def train_with_grpo(
         max_prompt_length=128,
         max_completion_length=400,
         num_generations=4,
+        generation_batch_size=4,  # Must be divisible by num_generations
         temperature=1.0,
         beta=0.1,
         epsilon=0.2,
@@ -307,10 +308,12 @@ def train_with_grpo(
     # Initialize GRPO trainer with custom callback
     grpo_trainer = GRPOTrainer(
         model=model,
-        processing_class=tokenizer,
-        config=grpo_config,
+        reward_funcs=reward_function,
+        args=grpo_config,
         train_dataset=train_dataset,
-        reward_function=reward_function,
+
+        processing_class=tokenizer,
+
         callbacks=[GRPOLoggingCallback(log_file)],
     )
 
