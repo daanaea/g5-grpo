@@ -274,9 +274,11 @@ def train_with_grpo(
         gradient_accumulation_steps=1,
         learning_rate=1e-6,
         num_train_epochs=1,
-        max_steps=10,
+
+        max_steps=5,
         logging_steps=1,
         save_steps=1,
+        
         max_prompt_length=128,
         max_completion_length=400,
         num_generations=4,
