@@ -161,7 +161,8 @@ def plot_losses(metrics, output_dir):
     grpo_loss = metrics['grpo_loss']
     if has_valid_data(grpo_loss):
         print('found grpo loss!')
-        axes[0, 0].plot(steps, grpo_loss, label='GRPO loss')
+        print(grpo_loss)
+        axes[0, 0].scatter(steps, grpo_loss, label='GRPO loss')
         axes[0, 0].set_xlabel('Training Step')
         axes[0, 0].set_ylabel('Loss')
         axes[0, 0].set_title('GRPO Loss Over Training')
@@ -179,9 +180,9 @@ def plot_losses(metrics, output_dir):
 
     if has_policy or has_kl:
         if has_policy:
-            axes[0, 1].plot(steps, policy_loss, 'g-', linewidth=2, label='Policy Loss')
+            axes[0, 1].scatter(steps, policy_loss, 'g-', linewidth=2, label='Policy Loss')
         if has_kl:
-            axes[0, 1].plot(steps, kl_loss, 'r-', linewidth=2, label='KL Loss')
+            axes[0, 1].scatter(steps, kl_loss, 'r-', linewidth=2, label='KL Loss')
         axes[0, 1].set_xlabel('Training Step')
         axes[0, 1].set_ylabel('Loss')
         axes[0, 1].set_title('Policy Loss and KL Divergence')
@@ -194,7 +195,7 @@ def plot_losses(metrics, output_dir):
     # Gradient Norm
     grad_norm = metrics['grad_norm']
     if has_valid_data(grad_norm):
-        axes[1, 0].plot(steps, grad_norm, 'm-', linewidth=2)
+        axes[1, 0].scatter(steps, grad_norm, 'm-', linewidth=2)
         axes[1, 0].set_xlabel('Training Step')
         axes[1, 0].set_ylabel('Gradient Norm')
         axes[1, 0].set_title('Gradient Norm Over Training')
@@ -206,7 +207,7 @@ def plot_losses(metrics, output_dir):
     # Learning Rate
     lr = metrics['learning_rate']
     if has_valid_data(lr):
-        axes[1, 1].plot(steps, lr, 'orange', linewidth=2)
+        axes[1, 1].scatter(steps, lr, 'orange', linewidth=2)
         axes[1, 1].set_xlabel('Training Step')
         axes[1, 1].set_ylabel('Learning Rate')
         axes[1, 1].set_title('Learning Rate Schedule')
