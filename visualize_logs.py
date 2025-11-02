@@ -160,7 +160,8 @@ def plot_losses(metrics, output_dir):
     # GRPO Loss
     grpo_loss = metrics['grpo_loss']
     if has_valid_data(grpo_loss):
-        axes[0, 0].plot(steps, grpo_loss, 'b-', linewidth=2, label='GRPO Loss')
+        print('found grpo loss!')
+        axes[0, 0].plot(steps, grpo_loss, label='GRPO loss')
         axes[0, 0].set_xlabel('Training Step')
         axes[0, 0].set_ylabel('Loss')
         axes[0, 0].set_title('GRPO Loss Over Training')
