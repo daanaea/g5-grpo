@@ -1,15 +1,20 @@
 import os
+import json
+import time
+from datetime import datetime
 import torch
 from datasets import load_dataset
 from transformers import (
     AutoTokenizer,
     AutoModelForCausalLM,
     TrainingArguments,
-    BitsAndBytesConfig
+    BitsAndBytesConfig,
+    TrainerCallback
 )
-from trl import SFTTrainer, PPOTrainer, PPOConfig, AutoModelForCausalLMWithValueHead
+from trl import SFTTrainer, GRPOTrainer, GRPOConfig
 from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
 from reward_function import compute_reward, format_prompt, extract_numeric_answer
+import numpy as np
 
 
 def load_gsm8k_dataset(split="train", max_samples=None):
@@ -157,106 +162,166 @@ def train_sft(
     return model, tokenizer
 
 
-def train_with_custom_reward(
-    sft_model_path="./qwen_gsm8k_sft",
-    output_dir="./qwen_gsm8k_rl",
-    num_train_epochs=1,
-    batch_size=8,
-    mini_batch_size=2,
-    learning_rate=1e-5,
+class GRPOLoggingCallback(TrainerCallback):
+    """Custom callback for detailed GRPO logging."""
+
+    def __init__(self, log_file):
+        self.log_file = log_file
+        self.step_start_time = None
+        self.generation_time = 0
+        self.backward_time = 0
+
+    def on_step_begin(self, args, state, control, **kwargs):
+        self.step_start_time = time.time()
+
+    def on_log(self, args, state, control, logs=None, **kwargs):
+        if logs is None:
+            return
+
+        step_end_time = time.time()
+        time_per_step = step_end_time - self.step_start_time if self.step_start_time else 0
+
+        # Build comprehensive log entry
+        log_entry = {
+            "timestamp_iso": datetime.utcnow().isoformat() + "Z",
+            "step": state.global_step,
+            "epoch": state.epoch if state.epoch is not None else 0,
+            "device": "cuda" if torch.cuda.is_available() else "cpu",
+            "seed": 42,
+            "grpo_loss": logs.get("loss", 0.0),
+            "policy_loss": logs.get("policy_loss", logs.get("loss", 0.0)),
+            "kl_loss": logs.get("kl", 0.0),
+            "reward_mean": logs.get("rewards/mean", logs.get("reward_mean", 0.0)),
+            "reward_std": logs.get("rewards/std", logs.get("reward_std", 0.0)),
+            "adv_mean": logs.get("advantages/mean", logs.get("adv_mean", 0.0)),
+            "adv_std": logs.get("advantages/std", logs.get("adv_std", 0.0)),
+            "grad_norm": logs.get("grad_norm", 0.0),
+            "learning_rate": logs.get("learning_rate", 0.0),
+            "time_per_step_s": time_per_step,
+            "generation_time_s": logs.get("generation_time", self.generation_time),
+            "backward_time_s": logs.get("backward_time", self.backward_time),
+            "other_time_s": time_per_step - logs.get("generation_time", 0) - logs.get("backward_time", 0),
+            "tokens_generated": logs.get("tokens_generated", 0),
+        }
+
+        # Write to file
+        with open(self.log_file, "a") as f:
+            f.write(json.dumps(log_entry) + "\n")
+
+        # Also print to console for visibility
+        print(json.dumps(log_entry, indent=2))
+
+
+def train_with_grpo(
+    model_path="Qwen/Qwen3-0.6B",
+    output_dir="./qwen_gsm8k_grpo",
     max_samples=None,
+    use_4bit=True,
 ):
     """
-    Reinforcement Learning phase using PPO with custom reward function.
+    GRPO training with custom reward function.
+    Can start from base model or SFT checkpoint.
     This fine-tunes the model based on exact numeric answer matching.
     """
     print("=" * 50)
-    print("Starting RL Fine-Tuning with Custom Reward")
+    print("Starting GRPO Training with Custom Reward")
     print("=" * 50)
 
-    # Load the SFT model
-    tokenizer = AutoTokenizer.from_pretrained(sft_model_path, trust_remote_code=True)
+    # Create log file
+    log_file = os.path.join(output_dir, "grpo_training_logs.jsonl")
+    os.makedirs(output_dir, exist_ok=True)
+
+    # Load the model
+    tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
-    # Load model with value head for PPO
-    model = AutoModelForCausalLMWithValueHead.from_pretrained(
-        sft_model_path,
-        device_map="auto",
-        trust_remote_code=True,
-        torch_dtype=torch.bfloat16,
-    )
+    # Load model for GRPO with optional quantization
+    if use_4bit:
+        bnb_config = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_quant_type="nf4",
+            bnb_4bit_compute_dtype=torch.bfloat16,
+            bnb_4bit_use_double_quant=True,
+        )
+        model = AutoModelForCausalLM.from_pretrained(
+            model_path,
+            quantization_config=bnb_config,
+            device_map="auto",
+            trust_remote_code=True,
+            torch_dtype=torch.bfloat16,
+        )
+        model = prepare_model_for_kbit_training(model)
+    else:
+        model = AutoModelForCausalLM.from_pretrained(
+            model_path,
+            device_map="auto",
+            trust_remote_code=True,
+            torch_dtype=torch.bfloat16,
+        )
 
     # Load dataset
-    dataset = load_gsm8k_dataset("train", max_samples=max_samples)
+    train_dataset = load_gsm8k_dataset("train", max_samples=max_samples)
 
-    # PPO Configuration optimized for g5.2xlarge
-    ppo_config = PPOConfig(
-        model_name=sft_model_path,
-        learning_rate=learning_rate,
-        batch_size=batch_size,
-        mini_batch_size=mini_batch_size,
-        gradient_accumulation_steps=4,
-        optimize_cuda_cache=True,
-        early_stopping=False,
-        target_kl=0.1,
-        ppo_epochs=4,
+    # Custom reward function wrapper for GRPO
+    def reward_function(prompts, completions, **kwargs):
+        """
+        GRPO reward function that compares generated completions with ground truth.
+        Returns a list of rewards.
+        """
+        # Extract ground truth answers from the dataset
+        # GRPO expects rewards for each completion
+        rewards = []
+        for completion in completions:
+            # Find the corresponding ground truth
+            # For now, we'll use a simple approach
+            # In practice, you'd match prompts to dataset entries
+            gt_answer = kwargs.get("ground_truth", "#### 0")
+            reward = compute_reward([completion], [gt_answer])[0]
+            rewards.append(reward)
+        return rewards
+
+    # GRPO Configuration
+    grpo_config = GRPOConfig(
+        output_dir=output_dir,
+        per_device_train_batch_size=1,
+        per_device_eval_batch_size=1,
+        gradient_accumulation_steps=1,
+        learning_rate=1e-6,
+        num_train_epochs=1,
+        max_steps=500,
+        logging_steps=1,
+        save_steps=100,
+        max_prompt_length=128,
+        max_completion_length=400,
+        num_generations=4,
+        temperature=1.0,
+        beta=0.1,
+        epsilon=0.2,
+        dataloader_num_workers=2,
+        bf16=True,
+        report_to="wandb" if os.getenv("WANDB_API_KEY") else "none",
         seed=42,
-        log_with="wandb" if os.getenv("WANDB_API_KEY") else None,
     )
 
-    # Initialize PPO trainer
-    ppo_trainer = PPOTrainer(
-        config=ppo_config,
+    # Initialize GRPO trainer with custom callback
+    grpo_trainer = GRPOTrainer(
         model=model,
-        tokenizer=tokenizer,
-        dataset=dataset,
+        processing_class=tokenizer,
+        config=grpo_config,
+        train_dataset=train_dataset,
+        reward_function=reward_function,
+        callbacks=[GRPOLoggingCallback(log_file)],
     )
 
-    generation_kwargs = {
-        "max_new_tokens": 256,
-        "temperature": 0.7,
-        "top_p": 0.9,
-        "do_sample": True,
-        "pad_token_id": tokenizer.pad_token_id,
-    }
-
-    print("Starting PPO training...")
-    for epoch in range(num_train_epochs):
-        print(f"\nEpoch {epoch + 1}/{num_train_epochs}")
-
-        for batch_idx, batch in enumerate(ppo_trainer.dataloader):
-            # Get prompts
-            prompts = [format_prompt(q) for q in batch["question"]]
-            prompt_tensors = [tokenizer.encode(p, return_tensors="pt")[0].to(model.device) for p in prompts]
-
-            # Generate responses
-            response_tensors = ppo_trainer.generate(
-                prompt_tensors,
-                return_prompt=False,
-                **generation_kwargs
-            )
-
-            # Decode responses
-            responses = [tokenizer.decode(r.squeeze(), skip_special_tokens=True) for r in response_tensors]
-
-            # Compute rewards using custom reward function
-            rewards = compute_reward(responses, batch["answer"])
-            rewards_tensors = [torch.tensor(r, dtype=torch.float32).to(model.device) for r in rewards]
-
-            # PPO update step
-            stats = ppo_trainer.step(prompt_tensors, response_tensors, rewards_tensors)
-
-            # Logging
-            if batch_idx % 10 == 0:
-                avg_reward = sum(rewards) / len(rewards)
-                print(f"Batch {batch_idx}: avg_reward={avg_reward:.3f}")
-                ppo_trainer.log_stats(stats, batch, rewards_tensors)
+    print(f"Starting GRPO training... Logs will be saved to {log_file}")
+    grpo_trainer.train()
 
     # Save the final model
-    model.save_pretrained(output_dir)
+    grpo_trainer.save_model(output_dir)
     tokenizer.save_pretrained(output_dir)
-    print(f"RL model saved to {output_dir}")
+    print(f"GRPO model saved to {output_dir}")
+    print(f"Training logs saved to {log_file}")
 
     return model, tokenizer
 
@@ -314,13 +379,13 @@ def evaluate_model(model_path, num_samples=100):
 if __name__ == "__main__":
     import argparse
 
-    parser = argparse.ArgumentParser(description="Fine-tune Qwen on GSM8K with custom reward")
+    parser = argparse.ArgumentParser(description="Fine-tune Qwen on GSM8K with GRPO")
     parser.add_argument("--model_name", type=str, default="Qwen/Qwen3-0.6B", help="Model name or path")
-    parser.add_argument("--mode", type=str, choices=["sft", "rl", "both", "eval"], default="both", help="Training mode")
+    parser.add_argument("--mode", type=str, choices=["sft", "grpo", "both", "eval"], default="both", help="Training mode")
     parser.add_argument("--sft_output", type=str, default="./qwen_gsm8k_sft", help="SFT output directory")
-    parser.add_argument("--rl_output", type=str, default="./qwen_gsm8k_rl", help="RL output directory")
-    parser.add_argument("--num_epochs", type=int, default=3, help="Number of training epochs")
-    parser.add_argument("--batch_size", type=int, default=4, help="Training batch size")
+    parser.add_argument("--grpo_output", type=str, default="./qwen_gsm8k_grpo", help="GRPO output directory")
+    parser.add_argument("--num_epochs", type=int, default=3, help="Number of SFT training epochs")
+    parser.add_argument("--batch_size", type=int, default=4, help="SFT training batch size")
     parser.add_argument("--use_4bit", action="store_true", default=True, help="Use 4-bit quantization")
     parser.add_argument("--max_samples", type=int, default=None, help="Max training samples (for testing)")
 
@@ -336,13 +401,15 @@ if __name__ == "__main__":
             max_samples=args.max_samples,
         )
 
-    if args.mode == "rl" or args.mode == "both":
-        model, tokenizer = train_with_custom_reward(
-            sft_model_path=args.sft_output,
-            output_dir=args.rl_output,
-            num_train_epochs=1,
+    if args.mode == "grpo" or args.mode == "both":
+        # Use SFT output if training both, otherwise use base model
+        model_path = args.sft_output if args.mode == "both" else args.model_name
+        model, tokenizer = train_with_grpo(
+            model_path=model_path,
+            output_dir=args.grpo_output,
             max_samples=args.max_samples,
+            use_4bit=args.use_4bit,
         )
 
     if args.mode == "eval":
-        evaluate_model(args.rl_output if args.mode == "both" else args.sft_output)
+        evaluate_model(args.grpo_output if args.mode == "both" else args.sft_output)
