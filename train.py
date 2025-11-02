@@ -180,6 +180,7 @@ class GRPOLoggingCallback(TrainerCallback):
         step_end_time = time.time()
         time_per_step = step_end_time - self.step_start_time if self.step_start_time else 0
 
+        # Build comprehensive log entry
         log_entry = {
             "timestamp_iso": datetime.utcnow().isoformat() + "Z",
             "step": state.global_step,
@@ -189,14 +190,10 @@ class GRPOLoggingCallback(TrainerCallback):
             "grpo_loss": logs.get("loss", 0.0),
             "policy_loss": logs.get("policy_loss", logs.get("loss", 0.0)),
             "kl_loss": logs.get("kl", 0.0),
-            "reward": logs.get("reward"),
-
-            "reward_mean": logs.get("reward/default/mean", logs.get("reward_mean", None)),
-            "reward_std": logs.get("reward/default/std", logs.get("reward_std", None)),
-            
+            "reward_mean": logs.get("rewards/mean", logs.get("reward_mean", 0.0)),
+            "reward_std": logs.get("rewards/std", logs.get("reward_std", 0.0)),
             "adv_mean": logs.get("advantages/mean", logs.get("adv_mean", None)),
             "adv_std": logs.get("advantages/std", logs.get("adv_std", None)),
-            
             "grad_norm": logs.get("grad_norm", 0.0),
             "learning_rate": logs.get("learning_rate", 0.0),
             "time_per_step_s": time_per_step,
@@ -281,7 +278,7 @@ def train_with_grpo(
         temperature=1.0,
         beta=0.1,
         epsilon=0.2,
-        dataloader_num_workers=2,
+        dataloader_num_workers=8,
         bf16=True,
         seed=42,
     )

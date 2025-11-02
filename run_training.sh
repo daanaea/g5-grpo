@@ -70,12 +70,7 @@ if ! python3 -c "import torch" 2>/dev/null; then
     python3 -m pip install --user torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
 fi
 
-python3 -m pip install --user --no-warn-script-location trl peft bitsandbytes wandb
-
-# Optional: Setup wandb for experiment tracking
-# Uncomment and set your API key
-# export WANDB_API_KEY="your_wandb_api_key_here"
-# export WANDB_PROJECT="qwen-gsm8k"
+python3 -m pip install --user --no-warn-script-location trl peft bitsandbytes
 
 # Test reward function
 echo ""
@@ -87,20 +82,20 @@ echo ""
 echo "Starting training pipeline..."
 
 # Option 1: Quick test run with limited samples (recommended for testing)
-# python3 train_qwen_gsm8k.py \
+# python3 train.py \
 #     --mode grpo \
 #     --model_name Qwen/Qwen3-0.6B \
 #     --max_samples 100 \
 #     --grpo_output ./qwen_gsm8k_grpo
 
 # Option 2: GRPO training only (no SFT, no 4-bit)
-python3 train_qwen_gsm8k.py \
+python3 train.py \
     --mode grpo \
     --model_name Qwen/Qwen3-0.6B \
     --grpo_output ./qwen_gsm8k_grpo
 
 # Option 3: SFT + GRPO (if you want both)
-# python3 train_qwen_gsm8k.py \
+# python3 train.py \
 #     --mode both \
 #     --model_name Qwen/Qwen3-0.6B \
 #     --num_epochs 3 \
@@ -112,7 +107,7 @@ python3 train_qwen_gsm8k.py \
 # Evaluate the model
 echo ""
 echo "Evaluating model..."
-python3 train_qwen_gsm8k.py --mode eval --grpo_output ./qwen_gsm8k_grpo
+python3 train.py --mode eval --grpo_output ./qwen_gsm8k_grpo
 
 echo ""
 echo "Training complete!"
