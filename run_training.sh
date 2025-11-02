@@ -22,11 +22,24 @@ elif [ -d "/usr/local/cuda-11" ]; then
 fi
 
 export PATH=$CUDA_HOME/bin:$PATH
-export LD_LIBRARY_PATH=$CUDA_HOME/lib64:$LD_LIBRARY_PATH
+export LD_LIBRARY_PATH=$CUDA_HOME/lib64:$CUDA_HOME/lib64/stubs:$LD_LIBRARY_PATH
+
+# Also check for alternative library locations
+if [ -d "$CUDA_HOME/lib" ]; then
+    export LD_LIBRARY_PATH=$CUDA_HOME/lib:$LD_LIBRARY_PATH
+fi
 
 echo "CUDA_HOME: $CUDA_HOME"
 echo "LD_LIBRARY_PATH: $LD_LIBRARY_PATH"
+echo ""
+echo "Checking CUDA installation:"
 nvcc --version 2>/dev/null || echo "nvcc not found"
+ls -la $CUDA_HOME/lib64/libcusparseLt.so* 2>/dev/null || echo "libcusparseLt.so not found in $CUDA_HOME/lib64"
+
+# Test if PyTorch can find CUDA
+echo ""
+echo "Testing PyTorch CUDA detection:"
+python3 -c "import torch; print('PyTorch version:', torch.__version__); print('CUDA available:', torch.cuda.is_available())" 2>&1 || echo "PyTorch import failed - will attempt to continue"
 
 # Check if we're on AWS instance
 if [ -f /etc/os-release ]; then
@@ -49,6 +62,14 @@ which pip3 || which pip
 # Use --ignore-installed to avoid conflicts with system packages
 echo ""
 echo "Installing dependencies..."
+
+# Check if PyTorch can import, if not, reinstall with bundled CUDA
+if ! python3 -c "import torch" 2>/dev/null; then
+    echo "PyTorch import failed. Reinstalling PyTorch with bundled CUDA 12.1..."
+    python3 -m pip uninstall -y torch torchvision torchaudio 2>/dev/null || true
+    python3 -m pip install --user torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+fi
+
 python3 -m pip install --user --no-warn-script-location trl peft bitsandbytes wandb
 
 # Optional: Setup wandb for experiment tracking

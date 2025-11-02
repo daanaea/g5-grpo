@@ -35,12 +35,9 @@ def load_gsm8k_dataset(split="train", max_samples=None):
     return formatted_dataset
 
 
-def setup_model_and_tokenizer(model_name="Qwen/Qwen2.5-0.5B", use_4bit=False):
+def setup_model_and_tokenizer(model_name="Qwen/Qwen3-0.6B", use_4bit=False):
     """
     Setup the model and tokenizer with optional 4-bit quantization.
-
-    Note: Using Qwen2.5-0.5B as Qwen3-0.6B may not be released yet.
-    Replace with actual model name when available.
     """
     tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
 
@@ -89,7 +86,7 @@ def setup_lora_config():
 
 
 def train_sft(
-    model_name="Qwen/Qwen2.5-0.5B",
+    model_name="Qwen/Qwen3-0.6B",
     output_dir="./qwen_gsm8k_sft",
     num_train_epochs=3,
     per_device_train_batch_size=4,
@@ -142,7 +139,7 @@ def train_sft(
         model=model,
         args=training_args,
         train_dataset=train_dataset,
-        tokenizer=tokenizer,
+        processing_class=tokenizer,
         dataset_text_field="text",
         max_seq_length=max_seq_length,
         packing=False,
@@ -318,7 +315,7 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(description="Fine-tune Qwen on GSM8K with custom reward")
-    parser.add_argument("--model_name", type=str, default="Qwen/Qwen2.5-0.5B", help="Model name or path")
+    parser.add_argument("--model_name", type=str, default="Qwen/Qwen3-0.6B", help="Model name or path")
     parser.add_argument("--mode", type=str, choices=["sft", "rl", "both", "eval"], default="both", help="Training mode")
     parser.add_argument("--sft_output", type=str, default="./qwen_gsm8k_sft", help="SFT output directory")
     parser.add_argument("--rl_output", type=str, default="./qwen_gsm8k_rl", help="RL output directory")
