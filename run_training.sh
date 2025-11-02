@@ -90,15 +90,13 @@ echo "Starting training pipeline..."
 # python3 train_qwen_gsm8k.py \
 #     --mode grpo \
 #     --model_name Qwen/Qwen3-0.6B \
-#     --use_4bit \
 #     --max_samples 100 \
 #     --grpo_output ./qwen_gsm8k_grpo
 
-# Option 2: GRPO training only (no SFT)
+# Option 2: GRPO training only (no SFT, no 4-bit)
 python3 train_qwen_gsm8k.py \
     --mode grpo \
     --model_name Qwen/Qwen3-0.6B \
-    --use_4bit \
     --grpo_output ./qwen_gsm8k_grpo
 
 # Option 3: SFT + GRPO (if you want both)

@@ -216,12 +216,11 @@ def train_with_grpo(
     model_path="Qwen/Qwen3-0.6B",
     output_dir="./qwen_gsm8k_grpo",
     max_samples=None,
-    use_4bit=True,
+    use_4bit=False,
 ):
     """
     GRPO training with custom reward function.
-    Can start from base model or SFT checkpoint.
-    This fine-tunes the model based on exact numeric answer matching.
+    Basic implementation following HuggingFace tutorial.
     """
     print("=" * 50)
     print("Starting GRPO Training with Custom Reward")
@@ -231,34 +230,17 @@ def train_with_grpo(
     log_file = os.path.join(output_dir, "grpo_training_logs.jsonl")
     os.makedirs(output_dir, exist_ok=True)
 
-    # Load the model
+    # Load the model and tokenizer
     tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
-    # Load model for GRPO with optional quantization
-    if use_4bit:
-        bnb_config = BitsAndBytesConfig(
-            load_in_4bit=True,
-            bnb_4bit_quant_type="nf4",
-            bnb_4bit_compute_dtype=torch.bfloat16,
-            bnb_4bit_use_double_quant=True,
-        )
-        model = AutoModelForCausalLM.from_pretrained(
-            model_path,
-            quantization_config=bnb_config,
-            device_map="auto",
-            trust_remote_code=True,
-            torch_dtype=torch.bfloat16,
-        )
-        model = prepare_model_for_kbit_training(model)
-    else:
-        model = AutoModelForCausalLM.from_pretrained(
-            model_path,
-            device_map="auto",
-            trust_remote_code=True,
-            torch_dtype=torch.bfloat16,
-        )
+    # Load model - simple setup as per tutorial
+    model = AutoModelForCausalLM.from_pretrained(
+        model_path,
+        torch_dtype=torch.bfloat16,
+        trust_remote_code=True,
+    )
 
     # Load dataset
     train_dataset = load_gsm8k_dataset("train", max_samples=max_samples)
@@ -389,7 +371,7 @@ if __name__ == "__main__":
     parser.add_argument("--grpo_output", type=str, default="./qwen_gsm8k_grpo", help="GRPO output directory")
     parser.add_argument("--num_epochs", type=int, default=3, help="Number of SFT training epochs")
     parser.add_argument("--batch_size", type=int, default=4, help="SFT training batch size")
-    parser.add_argument("--use_4bit", action="store_true", default=True, help="Use 4-bit quantization")
+    parser.add_argument("--use_4bit", action="store_true", default=False, help="Use 4-bit quantization")
     parser.add_argument("--max_samples", type=int, default=None, help="Max training samples (for testing)")
 
     args = parser.parse_args()
