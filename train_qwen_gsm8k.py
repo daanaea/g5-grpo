@@ -256,7 +256,8 @@ def train_with_grpo(
         rewards = []
 
         for i, completion in enumerate(completions):
-            gt_answer = dataset[i]["answer"] # kwargs.get("ground_truth", "#### 0")
+            # gt_answer = dataset[i]["answer"] # kwargs.get("ground_truth", "#### 0")
+            gt_answer = np.random.randint(1, 1_000_000)
             reward = compute_reward([completion], [gt_answer])[0]
             rewards.append(reward)
         
