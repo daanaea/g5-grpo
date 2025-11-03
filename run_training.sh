@@ -83,24 +83,33 @@ echo "Starting training pipeline..."
 
 # Option 1: Quick test run with limited samples (recommended for testing)
 # python3 train.py \
-#     --mode grpo \
-#     --model_name Qwen/Qwen3-0.6B \
+#     --mode both \
+#     --model_name Qwen/Qwen3-4B \
 #     --max_samples 100 \
+#     --num_epochs 1 \
+#     --sft_output ./qwen_gsm8k_sft \
 #     --grpo_output ./qwen_gsm8k_grpo
 
-# Option 2: GRPO training only (no SFT, no 4-bit)
+# Option 2: Full SFT + GRPO training (recommended)
 python3 train.py \
-    --mode grpo \
-    --model_name Qwen/Qwen3-0.6B \
+    --mode both \
+    --model_name Qwen/Qwen3-4B \
+    --num_epochs 3 \
+    --batch_size 4 \
+    --sft_output ./qwen_gsm8k_sft \
     --grpo_output ./qwen_gsm8k_grpo
 
-# Option 3: SFT + GRPO (if you want both)
+# Option 3: SFT only (if you only want the supervised fine-tuned model)
 # python3 train.py \
-#     --mode both \
-#     --model_name Qwen/Qwen3-0.6B \
+#     --mode sft \
+#     --model_name Qwen/Qwen3-4B \
 #     --num_epochs 3 \
 #     --batch_size 4 \
-#     --use_4bit \
+#     --sft_output ./qwen_gsm8k_sft
+
+# Option 4: GRPO only (requires existing SFT model)
+# python3 train.py \
+#     --mode grpo \
 #     --sft_output ./qwen_gsm8k_sft \
 #     --grpo_output ./qwen_gsm8k_grpo
 
@@ -111,5 +120,6 @@ python3 train.py --mode eval --grpo_output ./qwen_gsm8k_grpo
 
 echo ""
 echo "Training complete!"
+echo "  - SFT model: ./qwen_gsm8k_sft"
 echo "  - GRPO model: ./qwen_gsm8k_grpo"
 echo "  - Training logs: ./qwen_gsm8k_grpo/grpo_training_logs.jsonl"

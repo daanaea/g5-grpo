@@ -15,8 +15,8 @@ from transformers import (
     TrainerCallback
 )
 
-from trl import GRPOTrainer, GRPOConfig
-from peft import LoraConfig, prepare_model_for_kbit_training
+from trl import SFTTrainer, GRPOTrainer, GRPOConfig
+from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
 from reward_function import compute_reward, format_prompt
 
 import numpy as np
@@ -145,6 +145,85 @@ class GRPOLoggingCallback(TrainerCallback):
             f.write(json.dumps(log_entry) + "\n")
 
 
+def train_with_sft(
+    model_path="Qwen/Qwen3-4B",
+    output_dir="./qwen_gsm8k_sft",
+    num_epochs=3,
+    batch_size=4,
+    max_samples=None,
+    use_4bit=False,
+):
+    """
+    Supervised Fine-Tuning (SFT) to teach the model GSM8K answer format.
+
+    This pre-training phase teaches the base model:
+    - How to structure mathematical reasoning
+    - When to output the #### marker
+    - When to stop generating (EOS token usage)
+    """
+    print("=" * 60)
+    print("STARTING SFT TRAINING")
+    print("=" * 60)
+    print(f"Model: {model_path}")
+    print(f"Output: {output_dir}")
+    print(f"Epochs: {num_epochs}")
+    print(f"Batch size: {batch_size}")
+    print("=" * 60)
+
+    os.makedirs(output_dir, exist_ok=True)
+
+    # Load model and tokenizer
+    model, tokenizer = setup_model_and_tokenizer(model_path, use_4bit=use_4bit)
+
+    # Apply LoRA for parameter-efficient training
+    lora_config = setup_lora_config()
+    model = get_peft_model(model, lora_config)
+
+    print("\nLoRA adapter applied:")
+    model.print_trainable_parameters()
+
+    # Load dataset
+    train_dataset = load_gsm8k_dataset("train", max_samples=max_samples)
+
+    # SFT training arguments
+    training_args = TrainingArguments(
+        output_dir=output_dir,
+        per_device_train_batch_size=batch_size,
+        gradient_accumulation_steps=4,
+        num_train_epochs=num_epochs,
+        learning_rate=2e-4,
+        logging_steps=10,
+        save_steps=500,
+        save_total_limit=2,
+        bf16=True,
+        dataloader_num_workers=4,
+        report_to="none",
+        seed=42,
+    )
+
+    # SFT Trainer
+    sft_trainer = SFTTrainer(
+        model=model,
+        args=training_args,
+        train_dataset=train_dataset,
+        processing_class=tokenizer,
+        dataset_text_field="text",
+        max_seq_length=512,
+    )
+
+    print("\nStarting SFT training...")
+    sft_trainer.train()
+
+    # Save model
+    sft_trainer.save_model(output_dir)
+    tokenizer.save_pretrained(output_dir)
+
+    print(f"\nSFT model saved to {output_dir}")
+    print("=" * 60)
+
+    return model, tokenizer
+
+
 def train_with_grpo(
     model_path="Qwen/Qwen3-4B",
     output_dir="./qwen_gsm8k_grpo",
@@ -248,8 +327,6 @@ def train_with_grpo(
         beta=0.01,
         epsilon=0.2,
 
-        # Generation parameters
-        stop_token_ids=[tokenizer.eos_token_id] if tokenizer.eos_token_id else None,
         dataloader_num_workers=2,
         bf16=True,
         seed=42,
@@ -325,7 +402,7 @@ def evaluate_model(model_path, num_samples=100):
 if __name__ == "__main__":
     import argparse
 
-    parser = argparse.ArgumentParser(description="Fine-tune Qwen on GSM8K with GRPO")
+    parser = argparse.ArgumentParser(description="Fine-tune Qwen on GSM8K with SFT and GRPO")
     parser.add_argument("--model_name", type=str, default="Qwen/Qwen3-4B", help="Model name or path")
     parser.add_argument("--mode", type=str, choices=["sft", "grpo", "both", "eval"], default="both", help="Training mode")
     parser.add_argument("--sft_output", type=str, default="./qwen_gsm8k_sft", help="SFT output directory")
@@ -337,18 +414,78 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    model_path = args.model_name
-    model, tokenizer = train_with_grpo(
-        model_path=model_path,
-        output_dir=args.grpo_output,
-        max_samples=args.max_samples,
-        use_4bit=args.use_4bit,
-    )
-
+    # Evaluation mode
     if args.mode == "eval":
         if os.path.exists(args.grpo_output):
+            print(f"Evaluating GRPO model from {args.grpo_output}")
             evaluate_model(args.grpo_output)
         elif os.path.exists(args.sft_output):
+            print(f"Evaluating SFT model from {args.sft_output}")
             evaluate_model(args.sft_output)
         else:
             print(f"Error: No trained model found at {args.grpo_output} or {args.sft_output}")
+
+    # SFT training mode
+    elif args.mode == "sft":
+        print("Mode: SFT only")
+        model, tokenizer = train_with_sft(
+            model_path=args.model_name,
+            output_dir=args.sft_output,
+            num_epochs=args.num_epochs,
+            batch_size=args.batch_size,
+            max_samples=args.max_samples,
+            use_4bit=args.use_4bit,
+        )
+
+    # GRPO training mode (assumes SFT model exists, or uses base model)
+    elif args.mode == "grpo":
+        print("Mode: GRPO only")
+        # Use SFT model if it exists, otherwise use base model
+        if os.path.exists(args.sft_output):
+            model_path = args.sft_output
+            print(f"Using SFT-trained model from {model_path}")
+        else:
+            model_path = args.model_name
+            print(f"Using base model {model_path} (no SFT model found)")
+
+        model, tokenizer = train_with_grpo(
+            model_path=model_path,
+            output_dir=args.grpo_output,
+            max_samples=args.max_samples,
+            use_4bit=args.use_4bit,
+        )
+
+    # Both SFT + GRPO mode
+    elif args.mode == "both":
+        print("Mode: SFT + GRPO")
+
+        # Step 1: SFT training
+        print("\n" + "=" * 80)
+        print("PHASE 1: SUPERVISED FINE-TUNING (SFT)")
+        print("=" * 80)
+        sft_model, sft_tokenizer = train_with_sft(
+            model_path=args.model_name,
+            output_dir=args.sft_output,
+            num_epochs=args.num_epochs,
+            batch_size=args.batch_size,
+            max_samples=args.max_samples,
+            use_4bit=args.use_4bit,
+        )
+
+        # Step 2: GRPO training on SFT model
+        print("\n" + "=" * 80)
+        print("PHASE 2: GRPO TRAINING")
+        print("=" * 80)
+        grpo_model, grpo_tokenizer = train_with_grpo(
+            model_path=args.sft_output,  # Use SFT model as starting point
+            output_dir=args.grpo_output,
+            max_samples=args.max_samples,
+            use_4bit=args.use_4bit,
+        )
+
+        print("\n" + "=" * 80)
+        print("TRAINING COMPLETE")
+        print("=" * 80)
+        print(f"SFT model: {args.sft_output}")
+        print(f"GRPO model: {args.grpo_output}")
+        print("=" * 80)

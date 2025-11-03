@@ -45,12 +45,12 @@ python reward_function.py
 
 ## Training Pipeline
 
-The training uses GRPO (Group Relative Policy Optimization):
+The training uses a two-phase approach:
 
-- Optimizes policy using custom reward function
-- Performs exact numeric answer matching
-- Comprehensive logging of training metrics
-- Optional SFT phase for pre-training on reasoning chains
+1. **SFT (Supervised Fine-Tuning)**: Teaches the base Qwen3-4B model the GSM8K answer format and when to stop generating
+2. **GRPO (Group Relative Policy Optimization)**: Optimizes the SFT model using custom reward function for exact numeric answer matching
+
+Both phases include comprehensive logging of training metrics.
 
 ## Usage
 
@@ -66,26 +66,39 @@ Run the complete pipeline:
 **Test run (100 samples):**
 ```bash
 python3 train.py \
-    --mode grpo \
-    --model_name Qwen/Qwen3-0.6B \
+    --mode both \
+    --model_name Qwen/Qwen3-4B \
     --max_samples 100 \
+    --num_epochs 1 \
+    --sft_output ./qwen_gsm8k_sft \
     --grpo_output ./qwen_gsm8k_grpo
 ```
 
-**Full training:**
+**Full training (recommended - SFT + GRPO):**
 ```bash
-# GRPO training only (recommended)
-python3 train.py \
-    --mode grpo \
-    --model_name Qwen/Qwen3-0.6B \
-    --grpo_output ./qwen_gsm8k_grpo
-
-# SFT + GRPO (optional)
 python3 train.py \
     --mode both \
-    --model_name Qwen/Qwen3-0.6B \
+    --model_name Qwen/Qwen3-4B \
     --num_epochs 3 \
     --batch_size 4 \
+    --sft_output ./qwen_gsm8k_sft \
+    --grpo_output ./qwen_gsm8k_grpo
+```
+
+**SFT only:**
+```bash
+python3 train.py \
+    --mode sft \
+    --model_name Qwen/Qwen3-4B \
+    --num_epochs 3 \
+    --batch_size 4 \
+    --sft_output ./qwen_gsm8k_sft
+```
+
+**GRPO only (requires existing SFT model):**
+```bash
+python3 train.py \
+    --mode grpo \
     --sft_output ./qwen_gsm8k_sft \
     --grpo_output ./qwen_gsm8k_grpo
 ```
@@ -97,21 +110,21 @@ python3 train.py --mode eval --grpo_output ./qwen_gsm8k_grpo
 
 ## Command-line Arguments
 
-- `--model_name`: HuggingFace model name (default: Qwen/Qwen3-0.6B)
-- `--mode`: Training mode: sft, grpo, both, or eval
+- `--model_name`: HuggingFace model name (default: Qwen/Qwen3-4B)
+- `--mode`: Training mode: sft, grpo, both, or eval (default: both)
 - `--sft_output`: Directory for SFT model (default: ./qwen_gsm8k_sft)
 - `--grpo_output`: Directory for GRPO model (default: ./qwen_gsm8k_grpo)
 - `--num_epochs`: Number of SFT training epochs (default: 3)
 - `--batch_size`: Per-device SFT batch size (default: 4)
 - `--use_4bit`: Enable 4-bit quantization for SFT (default: False)
-- `--max_samples`: Limit training samples for testing
+- `--max_samples`: Limit training samples for testing (default: None = all samples)
 
 ## Optimization for g5.2xlarge
 
 - **BFloat16**: Better numerical stability than FP16
 - **Data loading**: Uses multiple vCPUs for parallel data loading
-- **GRPO Config**: Optimized for single A10G GPU (batch_size=1, num_generations=4)
-- **Optional LoRA**: Available for SFT phase with 4-bit quantization
+- **SFT with LoRA**: Parameter-efficient fine-tuning reduces memory usage
+- **GRPO Config**: Optimized for single A10G GPU (batch_size=4, gradient_accumulation=4, num_generations=4)
 
 ## Training Logs
 
@@ -148,24 +161,32 @@ The script also prints a summary of training statistics to the console.
 
 ## Notes
 
-- **Model**: Using Qwen/Qwen3-0.6B (0.6B parameters)
+- **Model**: Using Qwen/Qwen3-4B (4B parameters)
+- **Two-Phase Training**: SFT first teaches answer format, then GRPO optimizes for correctness
 - **Answer Format**: The model learns to output answers as `#### NUMBER`
 - **Reward Signal**: Only the final numeric answer is evaluated, not the reasoning steps
-- **GRPO Parameters**: temperature=1.0, beta=0.1, epsilon=0.2, num_generations=4
+- **SFT Parameters**: lr=2e-4, epochs=3, batch_size=4, LoRA r=16
+- **GRPO Parameters**: temperature=0.7, beta=0.01, epsilon=0.2, num_generations=4, lr=1e-6
 
 ## Troubleshooting
 
 **Out of Memory:**
-- GRPO is already optimized with batch_size=1
-- For SFT, reduce `--batch_size` to 2 or enable `--use_4bit`
+- For SFT: reduce `--batch_size` to 2 or enable `--use_4bit`
+- For GRPO: already optimized with batch_size=4, gradient_accumulation=4
 
 **Slow Training:**
 - Check GPU utilization: `nvidia-smi dmon`
 - Verify data loading workers in config
 
+**No Completions Generated (GRPO shows clipped_ratio=1.0):**
+- This means base model doesn't know the answer format
+- **Solution**: Run SFT first with `--mode both` or `--mode sft`
+- SFT teaches the model when to stop and how to format answers
+
 **Poor Results:**
 - Check that reward function is working: `python3 reward_function.py`
-- Verify training logs show non-zero rewards
+- Verify GRPO logs show non-zero rewards and completions
+- Ensure SFT completed successfully before running GRPO
 - Try adjusting GRPO hyperparameters (beta, epsilon, temperature)
 
 ## Citation
