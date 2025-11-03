@@ -82,6 +82,7 @@ class GRPOLoggingCallback(TrainerCallback):
         self.step_start_time = None
         self.generation_time = 0
         self.backward_time = 0
+        self.first_log = True
 
     def on_step_begin(self, args, state, control, **kwargs):
         self.step_start_time = time.time()
@@ -93,35 +94,55 @@ class GRPOLoggingCallback(TrainerCallback):
         step_end_time = time.time()
         time_per_step = step_end_time - self.step_start_time if self.step_start_time else 0
 
+        # Extract metrics
+        step = state.global_step
+        loss = logs.get("loss", 0.0)
+        reward_mean = logs.get("reward/default/mean", logs.get("reward_mean", 0.0))
+        reward_std = logs.get("reward/default/std", logs.get("reward_std", 0.0))
+        kl = logs.get("kl", 0.0)
+
+        # Calculate average completion length if tokens_generated is available
+        tokens_gen = logs.get("tokens_generated", 0)
+        # Assuming num_generations=4 from config
+        avg_completion_length = tokens_gen / 4 if tokens_gen > 0 else 0
+
+        # Print header on first log
+        if self.first_log:
+            print("\n" + "=" * 100)
+            print(f"{'Step':<8} | {'Loss':<12} | {'Reward':<12} | {'Reward Std':<12} | {'Completion Len':<15} | {'KL':<12}")
+            print("=" * 100)
+            self.first_log = False
+
+        # Print compact table row
+        print(f"{step:<8} | {loss:<12.6f} | {reward_mean:<12.6f} | {reward_std:<12.6f} | {avg_completion_length:<15.2f} | {kl:<12.6f}")
+
+        # Full log entry for JSONL file
         log_entry = {
             "timestamp_iso": datetime.utcnow().isoformat() + "Z",
-            "step": state.global_step,
+            "step": step,
             "epoch": state.epoch if state.epoch is not None else 0,
             "device": "cuda" if torch.cuda.is_available() else "cpu",
             "seed": 42,
-            "grpo_loss": logs.get("loss", 0.0),
-            "policy_loss": logs.get("policy_loss", logs.get("loss", 0.0)),
-            "kl_loss": logs.get("kl", 0.0),
+            "grpo_loss": loss,
+            "policy_loss": logs.get("policy_loss", loss),
+            "kl_loss": kl,
             "reward": logs.get("reward"),
-
-            "reward_mean": logs.get("reward/default/mean", logs.get("reward_mean", None)),
-            "reward_std": logs.get("reward/default/std", logs.get("reward_std", None)),
-            
+            "reward_mean": reward_mean,
+            "reward_std": reward_std,
             "adv_mean": logs.get("advantages/mean", logs.get("adv_mean", None)),
             "adv_std": logs.get("advantages/std", logs.get("adv_std", None)),
-            
             "grad_norm": logs.get("grad_norm", 0.0),
             "learning_rate": logs.get("learning_rate", 0.0),
             "time_per_step_s": time_per_step,
             "generation_time_s": logs.get("generation_time", self.generation_time),
             "backward_time_s": logs.get("backward_time", self.backward_time),
             "other_time_s": time_per_step - logs.get("generation_time", 0) - logs.get("backward_time", 0),
-            "tokens_generated": logs.get("tokens_generated", 0),
+            "tokens_generated": tokens_gen,
+            "avg_completion_length": avg_completion_length,
         }
 
         with open(self.log_file, "a") as f:
             f.write(json.dumps(log_entry) + "\n")
-        print(json.dumps(log_entry, indent=2))
 
 
 def train_with_grpo(
