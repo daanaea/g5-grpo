@@ -160,11 +160,13 @@ def train_with_grpo(
     tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
+        tokenizer.pad_token_id = tokenizer.eos_token_id
 
     model = AutoModelForCausalLM.from_pretrained(
         model_path,
-        dtype=torch.bfloat16,
+        torch_dtype=torch.bfloat16,
         trust_remote_code=True,
+        device_map="auto",
     )
 
     train_dataset = load_gsm8k_dataset("train", max_samples=max_samples)
@@ -237,14 +239,17 @@ def train_with_grpo(
         save_steps=500,
 
         max_prompt_length=128,
-        max_completion_length=256,
+        max_completion_length=128,
 
         num_generations=4,
         generation_batch_size=16,
 
-        temperature=1.0,
-        beta=0.1,
+        temperature=0.7,
+        beta=0.01,
         epsilon=0.2,
+
+        # Generation parameters
+        stop_token_ids=[tokenizer.eos_token_id] if tokenizer.eos_token_id else None,
         dataloader_num_workers=2,
         bf16=True,
         seed=42,
