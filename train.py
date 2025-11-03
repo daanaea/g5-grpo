@@ -159,7 +159,7 @@ def train_with_grpo(
         rewards = []
 
         for i, completion in enumerate(completions):
-            gt_answer = dataset[i]["answer"]
+            gt_answer = train_dataset[i]["answer"]
             reward = compute_reward([completion], [gt_answer])[0]
             rewards.append(reward)
         
