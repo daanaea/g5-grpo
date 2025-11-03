@@ -90,77 +90,6 @@ def setup_lora_config():
     )
 
 
-def train_sft(
-    model_name="Qwen/Qwen3-0.6B",
-    output_dir="./qwen_gsm8k_sft",
-    num_train_epochs=3,
-    per_device_train_batch_size=4,
-    gradient_accumulation_steps=4,
-    learning_rate=2e-4,
-    max_seq_length=512,
-    use_4bit=True,
-    max_samples=None,
-):
-    """
-    Supervised Fine-Tuning (SFT) phase.
-    This trains the model on the full reasoning chains.
-    """
-    print("=" * 50)
-    print("Starting Supervised Fine-Tuning (SFT)")
-    print("=" * 50)
-
-    # Load model and tokenizer
-    model, tokenizer = setup_model_and_tokenizer(model_name, use_4bit=use_4bit)
-
-    # Setup LoRA
-    lora_config = setup_lora_config()
-    model = get_peft_model(model, lora_config)
-    model.print_trainable_parameters()
-
-    # Load dataset
-    train_dataset = load_gsm8k_dataset("train", max_samples=max_samples)
-
-    # Training arguments optimized for g5.2xlarge (8 vCPUs, 1 GPU)
-    training_args = TrainingArguments(
-        output_dir=output_dir,
-        num_train_epochs=num_train_epochs,
-        per_device_train_batch_size=per_device_train_batch_size,
-        gradient_accumulation_steps=gradient_accumulation_steps,
-        learning_rate=learning_rate,
-        fp16=False,
-        bf16=True,
-        logging_steps=10,
-        save_strategy="epoch",
-        optim="adamw_torch",
-        warmup_steps=100,
-        dataloader_num_workers=8,
-        gradient_checkpointing=True,
-        max_grad_norm=1.0,
-    )
-
-    # Initialize trainer
-    trainer = SFTTrainer(
-        model=model,
-        args=training_args,
-        train_dataset=train_dataset,
-        processing_class=tokenizer,
-        dataset_text_field="text",
-        max_seq_length=max_seq_length,
-        packing=False,
-    )
-
-    # Train
-    print("Starting training...")
-    trainer.train()
-
-    # Save the final model
-    trainer.save_model(output_dir)
-    tokenizer.save_pretrained(output_dir)
-    print(f"Model saved to {output_dir}")
-
-    return model, tokenizer
-
-
 class GRPOLoggingCallback(TrainerCallback):
     """Custom callback for detailed GRPO logging."""
 
@@ -221,33 +150,23 @@ def train_with_grpo(
     use_4bit=False,
 ):
     """
-    GRPO training with custom reward function.
-    Basic implementation following HuggingFace tutorial.
+    GRPO training with custom reward function
     """
-    print("=" * 50)
-    print("Starting GRPO Training with Custom Reward")
-    print("=" * 50)
-
-    # Create log file
     log_file = os.path.join(output_dir, "grpo_training_logs.jsonl")
     os.makedirs(output_dir, exist_ok=True)
 
-    # Load the model and tokenizer
     tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
-    # Load model - simple setup as per tutorial
     model = AutoModelForCausalLM.from_pretrained(
         model_path,
-        torch_dtype=torch.bfloat16,
+        dtype=torch.bfloat16,
         trust_remote_code=True,
     )
 
-    # Load dataset
     train_dataset = load_gsm8k_dataset("train", max_samples=max_samples)
 
-    # Custom reward function wrapper for GRPO
     def reward_function(prompts, completions, **kwargs):
         """
         GRPO reward function that compares generated completions with ground truth.
@@ -259,7 +178,7 @@ def train_with_grpo(
         rewards = []
 
         for i, completion in enumerate(completions):
-            gt_answer = dataset[i]["answer"] # kwargs.get("ground_truth", "#### 0")
+            gt_answer = dataset[i]["answer"]
             reward = compute_reward([completion], [gt_answer])[0]
             rewards.append(reward)
         
@@ -269,20 +188,25 @@ def train_with_grpo(
 
     grpo_config = GRPOConfig(
         output_dir=output_dir,
-        per_device_train_batch_size=1,
-        per_device_eval_batch_size=1,
-        gradient_accumulation_steps=1,
+
+        per_device_train_batch_size=4,
+        per_device_eval_batch_size=4,
+
+        gradient_accumulation_steps=4,
+
         learning_rate=1e-6,
         num_train_epochs=1,
 
-        max_steps=5,
-        logging_steps=1,
-        save_steps=1,
+        max_steps=100,
+        logging_steps=5,
+        save_steps=50,
         
         max_prompt_length=128,
         max_completion_length=400,
+
         num_generations=4,
         generation_batch_size=4,
+        
         temperature=1.0,
         beta=0.1,
         epsilon=0.2,
@@ -291,7 +215,6 @@ def train_with_grpo(
         seed=42,
     )
 
-    # Initialize GRPO trainer with custom callback
     grpo_trainer = GRPOTrainer(
         model=model,
         reward_funcs=lambda prompts, completions, **kwargs: reward_function(prompts, completions, dataset=train_dataset),
