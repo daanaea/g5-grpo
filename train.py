@@ -169,21 +169,54 @@ def train_with_grpo(
 
     train_dataset = load_gsm8k_dataset("train", max_samples=max_samples)
 
+    # Create a mapping from prompts to ground truth answers
+    prompt_to_answer = {}
+    for example in train_dataset:
+        prompt_to_answer[example["prompt"]] = example["answer"]
+
+    # Debug counter
+    debug_count = [0]
+
     def reward_function(prompts, completions, **kwargs):
         """
         GRPO reward function that compares generated completions with ground truth.
-        Returns a list of rewards.
-        """
-        # # random reward for testing
-        # return [np.random.uniform(0, 1) for _ in completions]
 
+        Args:
+            prompts: List of prompt strings (batch_size × num_generations items)
+            completions: List of completion strings
+
+        Returns:
+            List of rewards (0.0 or 1.0 for each completion)
+        """
         rewards = []
 
+        # Debug: print first completion every 10 calls
+        if debug_count[0] % 10 == 0:
+            print("\n" + "="*80)
+            print("DEBUG: Sample prompt and completion")
+            print("="*80)
+            if len(prompts) > 0:
+                print(f"Prompt: {prompts[0][:150]}...")
+            if len(completions) > 0:
+                print(f"Completion: {completions[0][:200]}...")
+                print(f"Has ####: {'####' in completions[0]}")
+            print("="*80 + "\n")
+        debug_count[0] += 1
+
+        # Process each completion
         for i, completion in enumerate(completions):
-            gt_answer = train_dataset[i]["answer"]
+            # Get corresponding prompt (GRPO repeats prompts for each generation)
+            # With batch_size=4 and num_generations=4, we have 16 prompts/completions
+            # prompts = [p1, p1, p1, p1, p2, p2, p2, p2, p3, p3, p3, p3, p4, p4, p4, p4]
+            prompt = prompts[i] if i < len(prompts) else prompts[0]
+
+            # Get ground truth answer for this prompt
+            gt_answer = prompt_to_answer.get(prompt, "#### 0")
+
+            # Compute reward
             reward = compute_reward([completion], [gt_answer])[0]
             rewards.append(reward)
-        
+
         return rewards
     
     
@@ -202,12 +235,12 @@ def train_with_grpo(
         max_steps=500,
         logging_steps=1,
         save_steps=500,
-        
+
         max_prompt_length=128,
-        max_completion_length=400,
+        max_completion_length=256,
 
         num_generations=4,
-        generation_batch_size=4,
+        generation_batch_size=16,
 
         temperature=1.0,
         beta=0.1,
