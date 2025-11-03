@@ -15,7 +15,7 @@ from transformers import (
     TrainerCallback
 )
 
-from trl import SFTTrainer, GRPOTrainer, GRPOConfig
+from trl import GRPOTrainer, GRPOConfig, SFTTrainer, SFTConfig
 from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
 from reward_function import compute_reward, format_prompt
 
@@ -65,8 +65,8 @@ def setup_model_and_tokenizer(model_name="Qwen/Qwen3-4B", use_4bit=False):
 def setup_lora_config():
     """Configure LoRA for parameter-efficient fine-tuning."""
     return LoraConfig(
-        r=16,  # LoRA rank
-        lora_alpha=32,  # LoRA alpha
+        r=16, 
+        lora_alpha=32,
         target_modules=["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],
         lora_dropout=0.05,
         bias="none",
@@ -182,40 +182,16 @@ def train_with_sft(
     print("\nLoRA adapter applied:")
     model.print_trainable_parameters()
 
-    # Load dataset
     train_dataset = load_gsm8k_dataset("train", max_samples=max_samples)
 
-    # SFT training arguments
-    from trl import SFTConfig
-
-    sft_config = SFTConfig(
-        output_dir=output_dir,
-        per_device_train_batch_size=batch_size,
-        gradient_accumulation_steps=4,
-        num_train_epochs=num_epochs,
-        learning_rate=2e-4,
-        logging_steps=10,
-        save_steps=500,
-        save_total_limit=2,
-        bf16=True,
-        dataloader_num_workers=4,
-        report_to="none",
-        seed=42,
-        max_seq_length=512,
-    )
-
-    # SFT Trainer
     sft_trainer = SFTTrainer(
         model=model,
-        args=sft_config,
-        train_dataset=train_dataset,
-        processing_class=tokenizer,
+        args=SFTConfig(max_length=None),
+        train_dataset=train_dataset
     )
 
-    print("\nStarting SFT training...")
     sft_trainer.train()
 
-    # Save model
     sft_trainer.save_model(output_dir)
     tokenizer.save_pretrained(output_dir)
 
