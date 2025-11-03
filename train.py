@@ -186,7 +186,9 @@ def train_with_sft(
     train_dataset = load_gsm8k_dataset("train", max_samples=max_samples)
 
     # SFT training arguments
-    training_args = TrainingArguments(
+    from trl import SFTConfig
+
+    sft_config = SFTConfig(
         output_dir=output_dir,
         per_device_train_batch_size=batch_size,
         gradient_accumulation_steps=4,
@@ -199,16 +201,15 @@ def train_with_sft(
         dataloader_num_workers=4,
         report_to="none",
         seed=42,
+        max_seq_length=512,
     )
 
     # SFT Trainer
     sft_trainer = SFTTrainer(
         model=model,
-        args=training_args,
+        args=sft_config,
         train_dataset=train_dataset,
         processing_class=tokenizer,
-        dataset_text_field="text",
-        max_seq_length=512,
     )
 
     print("\nStarting SFT training...")
