@@ -15,7 +15,7 @@ from reward_function import compute_reward, format_prompt
 
 
 def evaluate_initial_accuracy(
-    model_name="Qwen/Qwen3-0.6B",
+    model_name="Qwen/Qwen3-4B",
     num_samples=None,
     split="test"
 ):
@@ -151,7 +151,7 @@ def main():
     parser.add_argument(
         "--model_name",
         type=str,
-        default="Qwen/Qwen3-0.6B",
+        default="Qwen/Qwen3-4B",
         help="Model name or path"
     )
     parser.add_argument(
