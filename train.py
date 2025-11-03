@@ -184,12 +184,28 @@ def train_with_sft(
 
     train_dataset = load_gsm8k_dataset("train", max_samples=max_samples)
 
+    # Define formatting function to use the "text" field
+    def formatting_func(example):
+        return example["text"]
+
     sft_trainer = SFTTrainer(
         model=model,
-        args=SFTConfig(max_length=None),
-        train_dataset=train_dataset
+        args=SFTConfig(
+            output_dir=output_dir,
+            num_train_epochs=num_epochs,
+            per_device_train_batch_size=batch_size,
+            learning_rate=2e-4,
+            logging_steps=10,
+            save_steps=500,
+            bf16=True,
+            gradient_accumulation_steps=4,
+        ),
+        train_dataset=train_dataset,
+        processing_class=tokenizer,
+        formatting_func=formatting_func,
     )
 
+    print("\nStarting SFT training...")
     sft_trainer.train()
 
     sft_trainer.save_model(output_dir)
