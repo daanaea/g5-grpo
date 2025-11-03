@@ -35,7 +35,8 @@ def load_gsm8k_dataset(split="train", max_samples=None):
         return {
             "text": prompt + " " + completion,
             "prompt": prompt,
-            "answer": completion,
+            "completion": completion,  # Changed from "answer" to "completion" for SFTTrainer
+            "answer": completion,  # Keep "answer" for GRPO compatibility
             "question": example["question"]
         }
 
@@ -184,10 +185,6 @@ def train_with_sft(
 
     train_dataset = load_gsm8k_dataset("train", max_samples=max_samples)
 
-    # Define formatting function to use the "text" field
-    def formatting_func(example):
-        return example["text"]
-
     sft_trainer = SFTTrainer(
         model=model,
         args=SFTConfig(
@@ -202,7 +199,6 @@ def train_with_sft(
         ),
         train_dataset=train_dataset,
         processing_class=tokenizer,
-        formatting_func=formatting_func,
     )
 
     print("\nStarting SFT training...")
