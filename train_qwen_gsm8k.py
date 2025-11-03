@@ -198,15 +198,15 @@ def train_with_grpo(
         num_train_epochs=1,
 
         max_steps=100,
-        logging_steps=5,
-        save_steps=50,
+        logging_steps=1,
+        save_steps=100,
         
         max_prompt_length=128,
         max_completion_length=400,
 
         num_generations=4,
         generation_batch_size=4,
-        
+
         temperature=1.0,
         beta=0.1,
         epsilon=0.2,
